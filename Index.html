@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Reaction Test — Klick, wenn grün!</title>
+  <style>
+    :root{font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;}
+    body{display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:linear-gradient(135deg,#0f172a,#031025);color:#e6eef8}
+    .card{width:min(720px,95vw);background:rgba(255,255,255,0.03);border-radius:14px;padding:22px;box-shadow:0 8px 30px rgba(2,6,23,0.6)}
+    h1{margin:0 0 8px;font-size:20px}
+    p.small{margin:6px 0;color:#c9d7ea;font-size:13px}
+    #stage{height:280px;border-radius:10px;background:#0b1220;display:flex;align-items:center;justify-content:center;flex-direction:column;margin:14px 0}
+    #bigBtn{width:220px;height:80px;border-radius:10px;border:none;background:#101828;color:#e6eef8;font-weight:700;font-size:18px}
+    #bigBtn:active{transform:translateY(1px)}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button.light{background:transparent;border:1px solid rgba(255,255,255,0.12);color:#dceaf8;padding:8px 12px;border-radius:8px}
+    .stats{margin-top:12px;background:rgba(0,0,0,0.25);padding:10px;border-radius:8px;font-size:13px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    td,th{padding:6px 8px;text-align:left;border-bottom:1px dashed rgba(255,255,255,0.04)}
+    .hint{font-size:12px;color:#9fb0d6}
+    .admin{margin-top:12px;display:flex;gap:8px;align-items:center}
+    textarea#collected{width:100%;height:200px;border-radius:8px;padding:8px;background:#071224;color:#d9eefc;border:none;font-family:monospace}
+    .danger{color:#ffb4b4}
+    footer{font-size:12px;color:#9fb0d6;margin-top:10px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Reaction Test — klick, wenn es grün wird</h1>
+    <p class="small">Ein kleines, sicheres Prank-Spiel. Du verschickst den Link, Leute spielen — und du bekommst harmlose, nicht-privilegierte Besuchsinfos (Browser, Bildschirmgröße, Sprache, Zeitpunkt, Reaktionszeit). Nichts Illegales. Anleitung unten.</p>
+
+    <div id="stage">
+      <div id="prompt">Warte auf Start...</div>
+      <button id="bigBtn">Start</button>
+      <div class="hint">Wenn der Hintergrund grün wird, klicke so schnell wie möglich auf den Knopf.</div>
+    </div>
+
+    <div class="controls">
+      <button id="newRound" class="light">Neue Runde</button>
+      <button id="showStats" class="light">Zeige gesammelte Daten (Admin)</button>
+      <button id="clearData" class="light danger">Gesammelte Daten löschen</button>
+    </div>
+
+    <div class="stats" id="sessionStats" aria-live="polite">
+      <strong>Letzte Runden:</strong>
+      <div id="lastResults">Keine Ergebnisse yet.</div>
+    </div>
+
+    <div class="admin" id="adminArea" style="display:none">
+      <div style="flex:1">
+        <label><strong>Lokale gesammelte Daten (JSON)</strong></label>
+        <textarea id="collected" readonly></textarea>
+      </div>
+    </div>
+
+    <footer>
+      Hinweis: Diese Demo speichert die Daten lokal in deinem Browser (localStorage). Damit kannst du den Link versenden und die Besucher sehen — aber die Daten bleiben nur auf deinem Gerät, solange du den Browser benutzt. Wenn du eine echte zentrale Sammlung willst, musst du eine einfache Server-API (z. B. GitHub Pages + Netlify Function, Glitch oder Replit) bereitstellen. Ich erkläre dir das unten.
+    </footer>
+  </div>
+
+<script>
+// --- Reaction Test Spiel + Lokale \"Analytics\" (nur legale, harmlose Infos)
+(function(){
+  const bigBtn = document.getElementById('bigBtn');
+  const prompt = document.getElementById('prompt');
+  const newRound = document.getElementById('newRound');
+  const lastResults = document.getElementById('lastResults');
+  const showStats = document.getElementById('showStats');
+  const adminArea = document.getElementById('adminArea');
+  const collectedTA = document.getElementById('collected');
+  const clearData = document.getElementById('clearData');
+  const stage = document.getElementById('stage');
+
+  let waiting = false;
+  let targetTime = 0;
+  let roundId = 0;
+
+  function getVisitorInfo(){
+    // nur harmlose, nicht-identifizierende Infos
+    return {
+      ts: new Date().toISOString(),
+      ua: navigator.userAgent || null,
+      language: navigator.language || null,
+      screen: {w: screen.width, h: screen.height},
+      viewport: {w: window.innerWidth, h: window.innerHeight},
+      platform: navigator.platform || null,
+      // we collect the orientation (landscape/portrait) – non sensitive
+      orientation: (window.innerWidth>window.innerHeight)?'landscape':'portrait'
+    };
+  }
+
+  function saveRecord(record){
+    // Speicherung lokal (secure, nur auf deinem Browser)
+    const key = 'reaction-demo-records';
+    const arr = JSON.parse(localStorage.getItem(key)||'[]');
+    arr.push(record);
+    localStorage.setItem(key, JSON.stringify(arr));
+    refreshLastResults();
+  }
+
+  function refreshLastResults(){
+    const key = 'reaction-demo-records';
+    const arr = JSON.parse(localStorage.getItem(key)||'[]');
+    if(!arr.length){ lastResults.textContent = 'Noch keine Ergebnisse.'; collectedTA.value = '' ; return; }
+    lastResults.innerHTML = arr.slice(-6).reverse().map(r=>{
+      return `<div>• ${r.ts.split('T')[0]} ${r.ts.split('T')[1].slice(0,8)} — RT: ${r.reactionMs}ms — UA: ${r.ua.split(')')[0]+')'}</div>`;
+    }).join('');
+    collectedTA.value = JSON.stringify(arr, null, 2);
+  }
+
+  function clearAll(){
+    if(confirm('Bist du sicher? Alle lokal gesammelten Daten werden gelöscht.')){
+      localStorage.removeItem('reaction-demo-records');
+      refreshLastResults();
+    }
+  }
+
+  // UI handlers
+  newRound.addEventListener('click', ()=>startRound());
+  showStats.addEventListener('click', ()=>{ adminArea.style.display = adminArea.style.display==='none'? 'flex':'none'; refreshLastResults(); });
+  clearData.addEventListener('click', clearAll);
+
+  bigBtn.addEventListener('click', ()=>{
+    if(!waiting){
+      // start
+      startRound();
+      return;
+    }
+    // if waiting then user clicked — maybe too early
+    const now = performance.now();
+    if(now < targetTime){
+      // too early
+      stage.style.background = '#3b2b2b';
+      prompt.textContent = 'Zu früh! Warte auf Grün.';
+      waiting=false;
+      bigBtn.textContent = 'Start';
+      bigBtn.disabled = false;
+    } else {
+      // valid reaction
+      const reactionMs = Math.round(now - targetTime);
+      prompt.textContent = `Gut! Reaktionszeit: ${reactionMs} ms`;
+      document.body.style.background = 'linear-gradient(135deg,#042026,#01293a)';
+      waiting=false;
+      bigBtn.textContent = 'Start';
+      bigBtn.disabled = false;
+
+      // Build record (only harmless fields)
+      const visitor = getVisitorInfo();
+      const record = Object.assign({}, visitor, {round: ++roundId, reactionMs});
+      saveRecord(record);
+    }
+  });
+
+  function startRound(){
+    prompt.textContent = 'Warte auf Grün...';
+    bigBtn.textContent = 'Warte';
+    bigBtn.disabled = true;
+    // random delay 800ms - 3500ms
+    const delay = 800 + Math.random()*2700;
+    waiting = true;
+    targetTime = performance.now() + delay;
+    stage.style.background = '#0b1220';
+    document.body.style.background = 'linear-gradient(135deg,#0f172a,#031025)';
+
+    setTimeout(()=>{
+      if(!waiting) return; // früh geklickt
+      // go green
+      stage.style.background = '#1a5b2d';
+      prompt.textContent = 'KLICK!';
+      bigBtn.textContent = 'Klick!';
+      bigBtn.disabled = false;
+    }, delay);
+  }
+
+  // initial load
+  refreshLastResults();
+
+  // keyboard support
+  window.addEventListener('keydown', (e)=>{ if(e.key===' '){ bigBtn.click(); e.preventDefault(); } });
+
+})();
+</script>
+</body>
+</html>
